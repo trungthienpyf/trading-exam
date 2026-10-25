@@ -1,0 +1,40 @@
+
+name: Authorized Domain Security Check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  passive-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Check domain response
+        env:
+          TARGET_URL: https://tieulong2.net
+        run: |
+          set -eu
+
+          echo "Checking: $TARGET_URL"
+
+          curl --silent --show-error \
+            --connect-timeout 5 \
+            --max-time 15 \
+            --max-redirs 0 \
+            -D headers.txt \
+            -o /dev/null \
+            -w 'HTTP status: %{http_code}\n' \
+            "$TARGET_URL"
+
+          echo
+          echo "Selected response headers:"
+          grep -iE \
+            '^(strict-transport-security|content-security-policy|x-content-type-options|x-frame-options|server):' \
+            headers.txt || true
+
+          echo
+          echo "Check completed. This is not an exploit test."
