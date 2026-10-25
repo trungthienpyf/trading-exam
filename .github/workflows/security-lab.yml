@@ -1,0 +1,86 @@
+
+name: PHP Security Lab
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  security-tests:
+    name: Run isolated security verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Validate Docker Compose
+        working-directory: lab
+        run: docker compose config -q
+
+      - name: Start isolated lab
+        working-directory: lab
+        run: |
+          docker compose up -d
+          sleep 5
+          docker compose ps
+
+      - name: Run security verification tests
+        shell: bash
+        run: |
+          set +e
+          failed=0
+
+          run_test() {
+            echo "::group::$1"
+            timeout 120s bash -c "$2"
+            rc=$?
+            echo "Exit code: $rc"
+            echo "::endgroup::"
+
+            if [ "$rc" -ne 0 ]; then
+              failed=1
+            fi
+          }
+
+          run_test "Session injection verification" \
+            "python poc/verify_session_injection.py --target https://tieulong2.net"
+
+          run_test "Handler mismatch verification" \
+            "python poc/verify_handler_mismatch.py --targethttps://tieulong2.net"
+
+          run_test "OOM trigger verification" \
+            "python poc/verify_oom_trigger.py --host https://tieulong2.net"
+
+          run_test "FPM stale state verification" \
+            "python poc/verify_fpm_stale_state.py --target https://tieulong2.net"
+
+          exit "$failed"
+
+      - name: Collect lab logs
+        if: always()
+        working-directory: lab
+        run: docker compose logs --no-color || true
+
+      - name: Stop and remove lab containers
+        if: always()
+        working-directory: lab
+        run: docker compose down --volumes --remove-orphans || true
